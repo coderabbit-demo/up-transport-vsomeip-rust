@@ -233,16 +233,8 @@ where {
             session_id
         );
 
-        let (commstatus, vsomeip_msg_type) = {
-            if let Some(commstatus) = umsg.attributes.commstatus {
-                (
-                    commstatus.enum_value_or(UCode::UNIMPLEMENTED),
-                    message_type_e::MT_ERROR,
-                )
-            } else {
-                (UCode::UNIMPLEMENTED, message_type_e::MT_RESPONSE)
-            }
-        };
+        let (commstatus, vsomeip_msg_type) =
+            Self::resolve_response_commstatus(umsg.attributes.commstatus);
 
         vsomeip_msg
             .get_message_base_pinned()
@@ -276,6 +268,21 @@ where {
             _ => vsomeip::return_code_e::E_UNKNOWN,
         }
     }
+    fn resolve_response_commstatus(
+        commstatus: Option<protobuf::EnumOrUnknown<UCode>>,
+    ) -> (UCode, message_type_e) {
+        if let Some(commstatus) = commstatus {
+            let status_val = commstatus.enum_value_or(UCode::UNIMPLEMENTED);
+            if status_val == UCode::OK {
+                (UCode::OK, message_type_e::MT_RESPONSE)
+            } else {
+                (status_val, message_type_e::MT_ERROR)
+            }
+        } else {
+            (UCode::OK, message_type_e::MT_RESPONSE)
+        }
+    }
+
 }
 
 pub struct VsomeipMessageToUMessage;
@@ -597,4 +604,37 @@ impl VsomeipMessageToUMessage {
     }
 }
 
-// TODO: Add unit tests
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ucode_to_vsomeip_err_code_ok() {
+        assert_eq!(
+            UMessageToVsomeipMessage::ucode_to_vsomeip_err_code(UCode::OK),
+            vsomeip::return_code_e::E_OK
+        );
+    }
+
+    #[test]
+    fn test_ucode_to_vsomeip_err_code_unimplemented() {
+        assert_eq!(
+            UMessageToVsomeipMessage::ucode_to_vsomeip_err_code(UCode::UNIMPLEMENTED),
+            vsomeip::return_code_e::E_UNKNOWN
+        );
+    }
+
+    #[test]
+    fn test_commstatus_none_maps_to_ok_return_code() {
+        let (default_commstatus, msg_type) =
+            UMessageToVsomeipMessage::resolve_response_commstatus(None);
+        let new_return_code =
+            UMessageToVsomeipMessage::ucode_to_vsomeip_err_code(default_commstatus);
+        assert_eq!(
+            new_return_code,
+            vsomeip::return_code_e::E_OK,
+            "commstatus=None fallback must map to 0x00 (E_OK)"
+        );
+        assert_eq!(msg_type, message_type_e::MT_RESPONSE);
+    }
+}
