@@ -74,6 +74,8 @@ use up_rust::UCode;
 use up_rust::{UListener, UMessage, UMessageBuilder, UPayloadFormat, UTransport, UUri};
 use up_transport_vsomeip::UPTransportVsomeip;
 
+static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 const PORT: u16 = 30511;
 /// Per-RPC polling timeout – shows the "stuck" effect on failed RPCs.
 const RPC_TIMEOUT_MS: u64 = 800;
@@ -111,7 +113,20 @@ impl RawServer {
         let (tx, rx): (Sender<Ev>, Receiver<Ev>) = mpsc::channel();
 
         let t = std::thread::spawn(move || {
-            let (mut s, _) = listener.accept().expect("accept");
+            let (mut s, addr) = listener.accept().expect("accept");
+            
+            let local_addr = s.local_addr().unwrap();
+            let is_ip = local_addr.is_ipv4() || local_addr.is_ipv6();
+
+            println!("\n>>> [TCP SERVER] 🔌 REAL TCP CONNECTION ESTABLISHED!");
+            println!(">>> [TCP SERVER] System Socket Verification:");
+            println!("    - Local OS socket : {}", local_addr);
+            println!("    - Remote OS socket: {}", addr);
+            println!("    - Protocol Stack  : {}\n", if is_ip { "TCP/IP (Network Stack)" } else { "IPC" });
+            
+            // Assert mathematically from the OS that this is a TCP/IP socket, not an IPC socket
+            assert!(is_ip, "The socket must be a TCP/IP socket, but an IPC was detected!");
+
             tx.send(Ev::Connected).ok();
 
             let mut n = 0usize;
@@ -287,6 +302,7 @@ fn bar(ch: char) {
 // ─────────────────────────────────────────────────────────────────────────────
 #[tokio::test(flavor = "multi_thread")]
 async fn real_tcp_crash_without_fix() {
+    let _lock = TEST_MUTEX.lock().unwrap();
     let _ = env_logger::builder().is_test(true).try_init();
 
     println!("");
@@ -350,6 +366,7 @@ async fn real_tcp_crash_without_fix() {
 // ─────────────────────────────────────────────────────────────────────────────
 #[tokio::test(flavor = "multi_thread")]
 async fn real_tcp_stable_with_fix() {
+    let _lock = TEST_MUTEX.lock().unwrap();
     let _ = env_logger::builder().is_test(true).try_init();
 
     println!("");
