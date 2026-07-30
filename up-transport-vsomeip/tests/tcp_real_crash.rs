@@ -297,7 +297,7 @@ async fn rpc(
 }
 
 fn bar(ch: char) {
-    println!("{}", std::iter::repeat(ch).take(60).collect::<String>());
+    println!("{}", std::iter::repeat_n(ch, 60).collect::<String>());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -310,11 +310,12 @@ fn bar(ch: char) {
 // Expected: 1 / 5 responses received.  Total time ≈ 1 × fast + 4 × 800 ms.
 // ─────────────────────────────────────────────────────────────────────────────
 #[tokio::test(flavor = "multi_thread")]
+#[allow(clippy::await_holding_lock)]
 async fn real_tcp_crash_without_fix() {
     let _lock = TEST_MUTEX.lock().unwrap();
     let _ = env_logger::builder().is_test(true).try_init();
 
-    println!("");
+    println!();
     bar('═');
     println!("  BUG SCENARIO  |  SOME/IP Return Code 0xFF  →  TCP reset");
     bar('═');
@@ -374,11 +375,12 @@ async fn real_tcp_crash_without_fix() {
 // Expected: 5 / 5 responses received.  Total time ≈ 5 × fast.
 // ─────────────────────────────────────────────────────────────────────────────
 #[tokio::test(flavor = "multi_thread")]
+#[allow(clippy::await_holding_lock)]
 async fn real_tcp_stable_with_fix() {
     let _lock = TEST_MUTEX.lock().unwrap();
     let _ = env_logger::builder().is_test(true).try_init();
 
-    println!("");
+    println!();
     bar('═');
     println!("  FIX SCENARIO  |  SOME/IP Return Code 0x00  →  TCP stable");
     bar('═');
