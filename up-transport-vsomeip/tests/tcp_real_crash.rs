@@ -85,7 +85,7 @@ const RPC_TIMEOUT_MS: u64 = 800;
 // ─────────────────────────────────────────────────────────────────────────────
 enum Ev {
     Connected,
-    Sent { req: usize, rc: u8, bytes: usize },
+    Sent { rc: u8 },
     Closed,
 }
 
@@ -171,13 +171,12 @@ impl RawServer {
                     rc,   // Return Code
                 ];
                 resp.extend_from_slice(resp_pl);
-                let bytes = resp.len();
 
                 if s.write_all(&resp).is_err() {
                     tx.send(Ev::Closed).ok();
                     break;
                 }
-                tx.send(Ev::Sent { req: n, rc, bytes }).ok();
+                tx.send(Ev::Sent { rc }).ok();
             }
         });
 
@@ -268,8 +267,8 @@ async fn rpc(
     let srv = server.try_next();
 
     if ok {
-        let rc = match &srv {
-            Some(Ev::Sent { rc, .. }) => *rc,
+        let rc = match srv {
+            Some(Ev::Sent { rc }) => rc,
             _ => 0x00,
         };
         println!(
@@ -277,8 +276,8 @@ async fn rpc(
              ✓  delivered in  {ms:>4} ms"
         );
     } else {
-        let label = match &srv {
-            Some(Ev::Sent { rc: 0xFF, .. }) => {
+        let label = match srv {
+            Some(Ev::Sent { rc: 0xFF }) => {
                 "rc=0xFF  ✗  TCP RESET  (see vsomeip [error] above)".to_string()
             }
             _ => format!("         ✗  no TCP — timeout after {ms:>4} ms"),
