@@ -276,8 +276,6 @@ where {
             _ => vsomeip::return_code_e::E_UNKNOWN,
         }
     }
-
-
 }
 
 pub struct VsomeipMessageToUMessage;
@@ -618,6 +616,4 @@ mod tests {
             vsomeip::return_code_e::E_UNKNOWN
         );
     }
-
-
 }

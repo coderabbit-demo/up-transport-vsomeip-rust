@@ -114,7 +114,7 @@ impl RawServer {
 
         let t = std::thread::spawn(move || {
             let (mut s, addr) = listener.accept().expect("accept");
-            
+
             let local_addr = s.local_addr().unwrap();
             let is_ip = local_addr.is_ipv4() || local_addr.is_ipv6();
 
@@ -122,10 +122,20 @@ impl RawServer {
             println!(">>> [TCP SERVER] System Socket Verification:");
             println!("    - Local OS socket : {}", local_addr);
             println!("    - Remote OS socket: {}", addr);
-            println!("    - Protocol Stack  : {}\n", if is_ip { "TCP/IP (Network Stack)" } else { "IPC" });
-            
+            println!(
+                "    - Protocol Stack  : {}\n",
+                if is_ip {
+                    "TCP/IP (Network Stack)"
+                } else {
+                    "IPC"
+                }
+            );
+
             // Assert mathematically from the OS that this is a TCP/IP socket, not an IPC socket
-            assert!(is_ip, "The socket must be a TCP/IP socket, but an IPC was detected!");
+            assert!(
+                is_ip,
+                "The socket must be a TCP/IP socket, but an IPC was detected!"
+            );
 
             tx.send(Ev::Connected).ok();
 
