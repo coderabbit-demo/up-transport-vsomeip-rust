@@ -273,7 +273,7 @@ where {
             UCode::INTERNAL => vsomeip::return_code_e::E_NOT_REACHABLE,
             UCode::UNKNOWN => vsomeip::return_code_e::E_NOT_OK,
             UCode::FAILED_PRECONDITION => vsomeip::return_code_e::E_WRONG_PROTOCOL_VERSION,
-            _ => vsomeip::return_code_e::E_UNKNOWN,
+            _ => vsomeip::return_code_e::E_NOT_OK,
         }
     }
 }
@@ -610,10 +610,95 @@ mod tests {
     }
 
     #[test]
-    fn test_ucode_to_vsomeip_err_code_unimplemented() {
-        assert_eq!(
-            UMessageToVsomeipMessage::ucode_to_vsomeip_err_code(UCode::UNIMPLEMENTED),
-            vsomeip::return_code_e::E_UNKNOWN
+    fn test_unmapped_ucodes_use_generic_error() {
+        for ucode in [
+            UCode::CANCELLED,
+            UCode::ALREADY_EXISTS,
+            UCode::PERMISSION_DENIED,
+            UCode::UNAUTHENTICATED,
+            UCode::RESOURCE_EXHAUSTED,
+            UCode::ABORTED,
+            UCode::OUT_OF_RANGE,
+            UCode::UNIMPLEMENTED,
+        ] {
+            assert_eq!(
+                UMessageToVsomeipMessage::ucode_to_vsomeip_err_code(ucode),
+                vsomeip::return_code_e::E_NOT_OK,
+                "unexpected SOME/IP fallback for {ucode:?}"
+            );
+        }
+    }
+
+    // Directly exercise the outbound converter used by the transport.
+    struct TestRpcCorrelationRegistry(u32);
+    impl RpcCorrelationRegistry for TestRpcCorrelationRegistry {
+        fn retrieve_session_id(&self, _: crate::ClientId) -> crate::SessionId {
+            unreachable!()
+        }
+        fn insert_ue_request_correlation(
+            &self,
+            _: crate::SomeIpRequestId,
+            _: &crate::UProtocolReqId,
+            _: &UUri,
+        ) -> Result<(), UStatus> {
+            unreachable!()
+        }
+        fn remove_ue_request_correlation(
+            &self,
+            _: crate::SomeIpRequestId,
+        ) -> Result<(crate::UProtocolReqId, UUri), UStatus> {
+            unreachable!()
+        }
+        fn insert_me_request_correlation(
+            &self,
+            _: crate::UProtocolReqId,
+            _: crate::SomeIpRequestId,
+        ) -> Result<(), UStatus> {
+            unreachable!()
+        }
+        fn remove_me_request_correlation(
+            &self,
+            _: &crate::UProtocolReqId,
+        ) -> Result<crate::SomeIpRequestId, UStatus> {
+            Ok(self.0)
+        }
+    }
+
+    async fn assert_success_response_metadata(commstatus: Option<UCode>) {
+        use up_rust::UUID;
+        use vsomeip_sys::glue::make_runtime_wrapper;
+        let req_id = UUID::build();
+        let registry = Arc::new(TestRpcCorrelationRegistry(0x1234_5678));
+        let mut builder = UMessageBuilder::response(
+            UUri::try_from_parts("client", 0x1000, 1, 0).unwrap(),
+            req_id,
+            UUri::try_from_parts("service", 0x1234, 1, 0x0421).unwrap(),
         );
+        if let Some(commstatus) = commstatus {
+            builder.with_comm_status(commstatus);
+        }
+        let umsg = builder.build().unwrap();
+        let runtime_wrapper = make_runtime_wrapper(vsomeip::runtime::get());
+        let converted = UMessageToVsomeipMessage::umsg_response_to_vsomeip_message(
+            &umsg,
+            registry,
+            &runtime_wrapper,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            converted.get_message_base_pinned().get_message_type(),
+            message_type_e::MT_RESPONSE
+        );
+        assert_eq!(
+            converted.get_message_base_pinned().get_return_code(),
+            vsomeip::return_code_e::E_OK
+        );
+    }
+
+    #[tokio::test]
+    async fn test_success_response_metadata() {
+        assert_success_response_metadata(None).await;
+        assert_success_response_metadata(Some(UCode::OK)).await;
     }
 }
