@@ -11,25 +11,14 @@
 #  SPDX-License-Identifier: Apache-2.0
 # *******************************************************************************/
 
-name: Lint and Test - Bundled
+# Nightly-scheduled comprehensive test runs that would take too long for on-merge workflows
+# Note: running the coverage job would only make sense if we use that to upload coverage info to a public platform
+
+name: Nightly
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    paths:
-      - ".github/**"
-      - "**/include/**"
-      - "**/src/**"
-      - "**/Cargo.*"
-      - "build/**"
-  workflow_call:
-    inputs:
-      RUST_TOOLCHAIN:
-        type: string
-        description: 'The Rust toolchain to use for the workflow'
-        required: false
-        default: 'stable'
+  schedule:
+    - cron: '0 3 * * *'
   workflow_dispatch:
     inputs:
       RUST_TOOLCHAIN:
@@ -45,26 +34,21 @@ permissions:
   contents: read # needed for checking out the code
 
 env:
-  RUST_TOOLCHAIN: ${{ inputs.RUST_TOOLCHAIN || 'stable' }}
+  RUST_TOOLCHAIN: ${{ github.event.inputs.RUST_TOOLCHAIN || 'stable' }}
 
 jobs:
-
-  lint:
-    name: Lint
+  check-msrv:
     runs-on: ubuntu-22.04
-
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          submodules: "recursive"
           persist-credentials: false
+          submodules: "recursive"
 
-      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
-          components: rustfmt,clippy
+      - name: Install cargo-hack
+        run: cargo install --locked cargo-hack
 
-      - name: Setup build environment
+      - name: Setup native build dependencies
         id: setup-env
         shell: bash
         run: |
@@ -72,53 +56,37 @@ jobs:
           source "$GITHUB_WORKSPACE/.github/scripts/install-build-deps.sh"
           source "$GITHUB_WORKSPACE/.github/scripts/build-envsetup.sh"
 
-      - name: Check for code errors
+      - name: check MSRV
         env:
           VSOMEIP_INSTALL_PATH: ${{ steps.setup-env.outputs.VSOMEIP_INSTALL_PATH }}
           ARCH_SPECIFIC_CPP_STDLIB_PATH: ${{ steps.setup-env.outputs.ARCH_SPECIFIC_CPP_STDLIB_PATH }}
           GENERIC_CPP_STDLIB_PATH: ${{ steps.setup-env.outputs.GENERIC_CPP_STDLIB_PATH }}
-        run: cargo check --all-targets
+        run: |
+          cargo hack check --rust-version --workspace --all-targets --ignore-private --all-features
 
-      - name: Check code formatting
-        env:
-          VSOMEIP_INSTALL_PATH: ${{ steps.setup-env.outputs.VSOMEIP_INSTALL_PATH }}
-          ARCH_SPECIFIC_CPP_STDLIB_PATH: ${{ steps.setup-env.outputs.ARCH_SPECIFIC_CPP_STDLIB_PATH }}
-          GENERIC_CPP_STDLIB_PATH: ${{ steps.setup-env.outputs.GENERIC_CPP_STDLIB_PATH }}
-        run: cargo fmt -- --check
-
-      - name: Run Clippy
-        env:
-          VSOMEIP_INSTALL_PATH: ${{ steps.setup-env.outputs.VSOMEIP_INSTALL_PATH }}
-          ARCH_SPECIFIC_CPP_STDLIB_PATH: ${{ steps.setup-env.outputs.ARCH_SPECIFIC_CPP_STDLIB_PATH }}
-          GENERIC_CPP_STDLIB_PATH: ${{ steps.setup-env.outputs.GENERIC_CPP_STDLIB_PATH }}
-        run: cargo clippy --all-targets -- -W warnings -D warnings
-
-  test:
-    name: Test
+  check-latest-deps:
     runs-on: ubuntu-22.04
-
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          submodules: "recursive"
           persist-credentials: false
+          submodules: "recursive"
 
-      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      - name: Show toolchain information
-        run: |
-          rustup toolchain list
-          cargo --version
-
-      - name: Setup build environment
+      - name: Setup native build dependencies
         id: setup-env
         shell: bash
         run: |
           set -euo pipefail
           source "$GITHUB_WORKSPACE/.github/scripts/install-build-deps.sh"
           source "$GITHUB_WORKSPACE/.github/scripts/build-envsetup.sh"
+
+      - name: Update dependencies
+        run: cargo update --verbose
 
       - name: Run tests
         env:
@@ -128,24 +96,47 @@ jobs:
         run: |
           LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$VSOMEIP_INSTALL_PATH/lib \
             cargo test \
-              --all-features --all-targets -- \
+              --verbose --all-features --all-targets -- \
               --test-threads 1
 
-  build-docs:
-    name: Build documentation
+# disabled until we have cargo-deny configuration set up for this repo
+#   deny:
+#     uses: eclipse-uprotocol/ci-cd/.github/workflows/rust-deny-check.yaml@ad3f99eac0675c714f08c473412dae14d9fecaa8 # main
+#     with:
+#       arguments: --all-features --locked --exclude-dev
+
+# disabled until we have a SOME/IP transport spec that includes OFT specification items
+#   current-spec-compliance:
+#     uses: eclipse-uprotocol/ci-cd/.github/workflows/requirements-tracing.yaml@ad3f99eac0675c714f08c473412dae14d9fecaa8 # main
+#     with:
+#       env-file-suffix: "oft-current"
+
+  coverage:
+    name: Determine Test Coverage
     runs-on: ubuntu-22.04
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          submodules: "recursive"
           persist-credentials: false
+          submodules: "recursive"
 
-      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      - name: Setup build environment
+      - name: Install cargo-tarpaulin
+        run: |
+          cargo install --locked cargo-tarpaulin
+          cargo tarpaulin --version
+
+      - name: Show toolchain information
+        run: |
+          rustup toolchain list
+          cargo --version
+
+      - name: Setup native build dependencies
         id: setup-env
         shell: bash
         run: |
@@ -153,18 +144,35 @@ jobs:
           source "$GITHUB_WORKSPACE/.github/scripts/install-build-deps.sh"
           source "$GITHUB_WORKSPACE/.github/scripts/build-envsetup.sh"
 
-      - name: Create Documentation for vsomeip-sys
+      - name: Determine code coverage
         env:
           VSOMEIP_INSTALL_PATH: ${{ steps.setup-env.outputs.VSOMEIP_INSTALL_PATH }}
           ARCH_SPECIFIC_CPP_STDLIB_PATH: ${{ steps.setup-env.outputs.ARCH_SPECIFIC_CPP_STDLIB_PATH }}
           GENERIC_CPP_STDLIB_PATH: ${{ steps.setup-env.outputs.GENERIC_CPP_STDLIB_PATH }}
-        working-directory: ${{github.workspace}}
-        run: RUSTDOCFLAGS=-Dwarnings cargo doc -p vsomeip-sys --no-deps
+        run: |
+          export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${VSOMEIP_INSTALL_PATH}/lib
+          # enable nightly features so that we can also include Doctests
+          RUSTC_BOOTSTRAP=1 cargo tarpaulin \
+            --no-fail-fast \
+            --all-features --all-targets \
+            --doc \
+            -o xml -o lcov -o html \
+            -- --test-threads 1
 
-      - name: Create Documentation for up-transport-vsomeip
-        env:
-          VSOMEIP_INSTALL_PATH: ${{ steps.setup-env.outputs.VSOMEIP_INSTALL_PATH }}
-          ARCH_SPECIFIC_CPP_STDLIB_PATH: ${{ steps.setup-env.outputs.ARCH_SPECIFIC_CPP_STDLIB_PATH }}
-          GENERIC_CPP_STDLIB_PATH: ${{ steps.setup-env.outputs.GENERIC_CPP_STDLIB_PATH }}
-        working-directory: ${{github.workspace}}
-        run: RUSTDOCFLAGS=-Dwarnings cargo doc -p up-transport-vsomeip --no-deps
+      - name: Upload coverage report (xml)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Test Coverage Results (xml)
+          path: cobertura.xml
+
+      - name: Upload coverage report (lcov)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Test Coverage Results (lcov)
+          path: lcov.info
+
+      - name: Upload coverage report (html)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Test Coverage Results (html)
+          path: tarpaulin-report.html

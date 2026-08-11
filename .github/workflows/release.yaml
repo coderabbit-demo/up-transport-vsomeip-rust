@@ -18,12 +18,20 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      RUST_TOOLCHAIN:
+        description: 'The Rust toolchain to use for the workflow'
+        required: false
+        default: 'stable'
 
 permissions: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
+
+env:
+  RUST_TOOLCHAIN: ${{ github.event.inputs.RUST_TOOLCHAIN || 'stable' }}
 
 jobs:
   authenticate:
@@ -44,7 +52,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout release tag
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -144,26 +152,26 @@ jobs:
       id-token: write
     steps:
       - name: Checkout release tag
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          # make sure that the vsomeip submodule is checked out, because the build script for vsomeip-sys needs it
+          submodules: "recursive"
           persist-credentials: false
 
-      - name: Install native build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential cmake jq libboost-all-dev libclang-dev
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: rustfmt,clippy
+          cache: false
 
-      - name: Configure native build environment
+      - name: Setup native build dependencies
+        id: setup-env
         shell: bash
         run: |
           set -euo pipefail
-          source build/envsetup.sh highest
-          {
-            echo "ARCH_SPECIFIC_CPP_STDLIB_PATH=$ARCH_SPECIFIC_CPP_STDLIB_PATH"
-            echo "GENERIC_CPP_STDLIB_PATH=$GENERIC_CPP_STDLIB_PATH"
-            echo "VSOMEIP_INSTALL_PATH=$RUNNER_TEMP/vsomeip-install"
-          } >> "$GITHUB_ENV"
-          mkdir -p "$RUNNER_TEMP/vsomeip-install"
+          source "$GITHUB_WORKSPACE/.github/scripts/install-build-deps.sh"
+          source "$GITHUB_WORKSPACE/.github/scripts/build-envsetup.sh"
 
       - name: Read release version
         id: release
@@ -231,6 +239,10 @@ jobs:
 
       - name: Verify vsomeip-sys package
         if: steps.existing.outputs.sys_exists == 'false'
+        env:
+          VSOMEIP_INSTALL_PATH: ${{ steps.setup-env.outputs.VSOMEIP_INSTALL_PATH }}
+          ARCH_SPECIFIC_CPP_STDLIB_PATH: ${{ steps.setup-env.outputs.ARCH_SPECIFIC_CPP_STDLIB_PATH }}
+          GENERIC_CPP_STDLIB_PATH: ${{ steps.setup-env.outputs.GENERIC_CPP_STDLIB_PATH }}
         run: cargo package -p vsomeip-sys
 
       - name: Authenticate for vsomeip-sys
@@ -267,6 +279,10 @@ jobs:
 
       - name: Verify up-transport-vsomeip package
         if: steps.existing.outputs.transport_exists == 'false'
+        env:
+          VSOMEIP_INSTALL_PATH: ${{ steps.setup-env.outputs.VSOMEIP_INSTALL_PATH }}
+          ARCH_SPECIFIC_CPP_STDLIB_PATH: ${{ steps.setup-env.outputs.ARCH_SPECIFIC_CPP_STDLIB_PATH }}
+          GENERIC_CPP_STDLIB_PATH: ${{ steps.setup-env.outputs.GENERIC_CPP_STDLIB_PATH }}
         run: cargo package -p up-transport-vsomeip
 
       - name: Authenticate for up-transport-vsomeip
