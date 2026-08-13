@@ -1,0 +1,22 @@
+# An `#[allow(...)]` attribute placed on an item whose body contains `unsafe`
+# silently suppresses a lint over unsafe code. The suppression must be justified
+# in-line (why the lint is a false positive here) or removed. Catches the
+# `#[allow(clippy::mut_from_ref)]` over `Pin::new_unchecked` pattern.
+id: allow-over-unsafe
+language: rust
+severity: warning
+rule:
+  pattern: '#[allow($$$LINTS)]'
+  precedes:
+    kind: function_item
+    stopBy: neighbor
+    has:
+      kind: unsafe_block
+      stopBy: end
+message: >-
+  `#[allow(...)]` suppresses a lint on a function containing `unsafe`. Justify
+  the suppression in a comment (why the lint does not apply) or remove it;
+  blanket allows over unsafe code hide real soundness signals.
+note: >-
+  Lint suppressions over unsafe code erase exactly the diagnostics that matter
+  for a soundness argument. Each one needs a written rationale.
