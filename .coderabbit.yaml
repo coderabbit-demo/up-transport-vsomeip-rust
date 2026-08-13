@@ -1,0 +1,126 @@
+# yaml-language-server: $schema=https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json
+#
+# CodeRabbit configuration for up-transport-vsomeip-rust (evaluation fork).
+# Safety-critical Rust <-> C++ FFI over the vsomeip SOME/IP stack.
+#
+# CodeRabbit is used here as a review AID that strengthens the human review step.
+# It is NOT a qualified verification tool per ISO 26262-8 Clause 11 and does not
+# replace any activity in the V-model. Config is versioned in-repo so every gate
+# is auditable.
+language: en-US
+
+tone_instructions: >-
+  Safety-critical automotive Rust, unsafe C++ FFI. Findings are observations
+  tied to a line and the at-risk invariant, not corrections. No silent
+  refactors. Prioritise soundness, FFI panic-safety, data loss. You aid the
+  human review, not replace it.
+
+reviews:
+  profile: assertive
+  request_changes_workflow: true
+  high_level_summary: true
+  review_status: true
+  assess_linked_issues: true
+  related_issues: true
+  poem: false
+  sequence_diagrams: false
+
+  path_filters:
+    # Vendored COVESA vsomeip C++ submodule - upstream code we do not own.
+    - "!vsomeip-sys/vsomeip/**"
+    - "!target/**"
+
+  path_instructions:
+    - path: "**/*.rs"
+      instructions: >-
+        Safety-critical Rust. Flag any new or modified `unsafe` block, `unsafe
+        fn`, or `#[allow(...)]` over unsafe code that lacks an adjacent
+        `SAFETY:` justification stating the upheld invariant; a `TODO` where the
+        justification belongs is a defect. Treat as defects: panicking calls
+        (`unwrap`/`expect`/`panic!`/indexing/`assert!`) reachable from an
+        `extern "C"` or `#[no_mangle]` function without `catch_unwind`; lossy
+        `as` casts (prefer `try_into`); unknown enum/protobuf variants collapsed
+        to a default; malformed elements silently dropped via
+        `filter_map`/`unwrap_or_default`; `.lock()/.read()/.write().unwrap()` or
+        blocking calls on a vsomeip-callback / C++ dispatch path. Phrase findings
+        as observations.
+    - path: "vsomeip-sys/**"
+      instructions: >-
+        This crate is the raw C++ FFI surface (autocxx / cxx bindings, raw
+        pointers, Pin). Scrutinise pointer lifetimes, aliasing, and no-op-deleter
+        shared_ptr construction. Any raw pointer derived from a temporary that
+        outlives its source is a use-after-free.
+
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - main
+
+  # Deliberate: no machine-authored changes land in ASIL code without review.
+  # Silent autofixes/refactors break traceability from a change to its origin.
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: false
+    simplify:
+      enabled: false
+    autofix:
+      enabled: false
+
+  # Findings are gates, not advisory prose. Each gate is versioned in-repo so it
+  # is auditable - the A-SPICE story.
+  pre_merge_checks:
+    custom_checks:
+      - name: "Unsafe code justification"
+        mode: error
+        instructions: >-
+          FAIL if the diff adds or modifies an `unsafe` block, an `unsafe fn`, or
+          an `#[allow(...)]` attribute on an item containing `unsafe`, without an
+          adjacent comment starting `SAFETY:` (or a `# Safety` doc section) that
+          states the invariant making the operation sound. A `TODO` placed where
+          a safety justification belongs is a FAIL. PASS only if every touched
+          unsafe construct carries an explicit written justification.
+      - name: "FFI panic safety"
+        mode: error
+        instructions: >-
+          FAIL if the diff introduces or modifies an `extern "C"` function, or a
+          `#[no_mangle]` function callable from C/C++, whose body can panic
+          (`unwrap`, `expect`, `panic!`, slice indexing, `assert!`, arithmetic
+          that can overflow) without a `std::panic::catch_unwind` guard at the
+          boundary. A panic unwinding into C++ frames is undefined behaviour.
+          PASS only if every foreign-callable function is panic-safe.
+      - name: "No silent data loss"
+        mode: error
+        instructions: >-
+          FAIL if the diff maps an unknown or unrepresentable value to a silent
+          default instead of surfacing it: unknown protobuf/enum variants
+          collapsed to a default (e.g. `OK`, `UNSUBSCRIBED`), unknown
+          status/commstatus codes ignored rather than rejected, fields dropped
+          during a type conversion, `filter_map`/`unwrap_or_default` that
+          discards malformed elements from a result set, or `as` casts that can
+          truncate or wrap (use `try_into`). PASS if unknown or unrepresentable
+          inputs are rejected or explicitly handled.
+      - name: "Lock and blocking discipline"
+        mode: error
+        instructions: >-
+          FAIL if the diff adds `.lock().unwrap()`, `.read().unwrap()`,
+          `.write().unwrap()`, or a blocking call (`block_on`, blocking I/O) on a
+          path reachable from a vsomeip callback or the C++ dispatch thread. Lock
+          poisoning must be handled explicitly and the dispatch thread must not
+          block. PASS otherwise.
+      - name: "Requirement traceability"
+        mode: warning
+        instructions: >-
+          WARN if the PR description does not link a tracking issue or
+          requirement identifier (GitHub issue, Jira, or Linear). Safety-relevant
+          changes should trace to a requirement. This is a warning in this
+          evaluation repo; in a production A-SPICE setup it would be an error
+          with mandatory issue linkage.
+
+  tools:
+    ast-grep:
+      essential_rules: true
+      rule_dirs:
+        - ".coderabbit/ast-grep-rules"
