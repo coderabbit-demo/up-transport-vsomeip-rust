@@ -124,3 +124,5 @@ reviews:
       essential_rules: true
       rule_dirs:
         - ".coderabbit/ast-grep-rules"
+
+# config-file present on default branch
