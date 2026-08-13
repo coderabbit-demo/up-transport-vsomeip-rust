@@ -1,0 +1,24 @@
+# Every `unsafe` block must be immediately preceded by a `// SAFETY:` (or
+# `/* SAFETY: */`) comment stating the invariant that makes the operation sound.
+# This is the Rust community convention (clippy::undocumented_unsafe_blocks) and
+# a hard requirement for ISO 26262 unsafe-code justification traceability.
+id: unsafe-without-safety-comment
+language: rust
+severity: warning
+rule:
+  kind: unsafe_block
+  not:
+    follows:
+      any:
+        - kind: line_comment
+          regex: '(?i)SAFETY'
+        - kind: block_comment
+          regex: '(?i)SAFETY'
+      stopBy: neighbor
+message: >-
+  `unsafe` block has no adjacent SAFETY comment. Document the invariant that
+  makes this operation sound (`// SAFETY: ...`) so the justification is
+  reviewable and traceable.
+note: >-
+  Unsafe code must carry an auditable justification. An undocumented `unsafe`
+  block cannot be signed off against a coding-guideline requirement.

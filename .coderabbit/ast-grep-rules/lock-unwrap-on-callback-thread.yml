@@ -1,0 +1,22 @@
+# `.lock().unwrap()` / `.read().unwrap()` / `.write().unwrap()` panics on a
+# poisoned lock. On a callback-reachable path (e.g. the vsomeip C++ dispatch
+# thread) that panic unwinds into foreign frames (UB) or deadlocks the dispatch
+# loop. Handle the poison/error explicitly instead of unwrapping.
+id: lock-unwrap-on-callback-thread
+language: rust
+severity: warning
+rule:
+  any:
+    - pattern: $X.lock().unwrap()
+    - pattern: $X.read().unwrap()
+    - pattern: $X.write().unwrap()
+    - pattern: $X.lock().expect($$$ARGS)
+    - pattern: $X.read().expect($$$ARGS)
+    - pattern: $X.write().expect($$$ARGS)
+message: >-
+  Unwrapping a lock result panics on poisoning. On a callback / FFI-dispatch
+  path this either unwinds into C++ frames or stalls the dispatch thread. Handle
+  the `PoisonError` explicitly.
+note: >-
+  Prefer recovering the guard (`.unwrap_or_else(|e| e.into_inner())`) or
+  propagating an error; never `unwrap` a lock on a callback-reachable path.
