@@ -1,0 +1,30 @@
+# A panic that unwinds across an `extern "C"` boundary into C/C++ frames is
+# undefined behaviour. Inside any `extern "C"` fn, `unwrap`/`expect`/`panic!`/
+# `unreachable!`/`todo!`/`assert!` must be replaced with explicit error handling,
+# or the whole body wrapped in `std::panic::catch_unwind`.
+id: panic-in-extern-c
+language: rust
+severity: error
+rule:
+  any:
+    - pattern: $X.unwrap()
+    - pattern: $X.expect($$$ARGS)
+    - pattern: panic!($$$ARGS)
+    - pattern: unreachable!($$$ARGS)
+    - pattern: todo!($$$ARGS)
+    - pattern: unimplemented!($$$ARGS)
+    - pattern: assert!($$$ARGS)
+    - pattern: assert_eq!($$$ARGS)
+  inside:
+    kind: function_item
+    stopBy: end
+    has:
+      kind: function_modifiers
+      regex: extern
+message: >-
+  Potentially panicking call inside an `extern "C"` function. A panic unwinding
+  into C/C++ frames is undefined behaviour. Return an error code or wrap the body
+  in `std::panic::catch_unwind`.
+note: >-
+  FFI trampolines must be panic-safe. This is a hard UB boundary, not a style
+  preference.
